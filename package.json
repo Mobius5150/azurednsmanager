@@ -4,7 +4,6 @@
   "description": "Makes managing Azure DNS easy using configuration files.",
   "main": "dnsmanager.js",
   "dependencies": {
-    "azure": "^0.10.6",
     "azure-arm-dns": "^0.10.1",
     "azure-cli": "^0.9.10",
     "azure-common": "^0.9.14",
