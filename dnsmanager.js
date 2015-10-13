@@ -93,6 +93,7 @@ cli.main(function Main(args, opts) {
 
 	loadDefaultProfile(function(error, creds) {
 		if (error) {
+			if (error === true) return;
 			throw error;
 		}
 
@@ -132,8 +133,8 @@ function loadDefaultProfile(callback) {
 	}
 
 	if (subscription === null) {
-		callback(new Error('Could not find default subscription. Please run `azure login` and select one.'));
-		return;
+		cli.error('Could not find default subscription. Please run `azure login` and select one.');
+		return true;
 	}
 
 	auth.tokenCache.find({ tokenType: 'Bearer', tenantId: subscription.tenantId }, getUserAuthToken);
@@ -161,7 +162,7 @@ function loadDefaultProfile(callback) {
 
 		if (token === null) {
 			cli.error('Could not find valid Azure auth token from Azure CLI. Please run `azure login` and try again.');
-			callback(new Error('Could not find valid Azure auth token from Azure CLI. Please run `azure login` and try again.'), null);
+			callback(true, null);
 			return;
 		}
 
@@ -328,8 +329,12 @@ function compareRecordSetsAndApplyActions() {
 		table.push(['REMOVE RECORD', set.type, set.path, '-', summarizeRecordValue(set.record), set.reason]);
 	}
 
-	cli.info("======== Actions to be taken ========");
-	console.log(table.toString());
+	if (table.length > 0) {
+		cli.info("======== Actions to be taken ========");
+		console.log(table.toString());
+	} else {
+		cli.info("DNS records in sync. No actions to perform.")
+	}
 }
 
 function summarizeRecordValue(record, type) {
