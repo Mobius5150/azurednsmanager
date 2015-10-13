@@ -35,6 +35,7 @@ var cli = require('cli')
 cli .parse({
 	    recordsFile:   ['f', 'The path to the file with DNS Records', 'file', './records.txt'],
 	    fileEncoding:  ['e', 'The encoding for the DNS Records Text File', 'string', 'utf8'],
+	    summarizeCharLimit: ['s', 'The maximum number of characters in a value before truncation (0 for unlimited)', 'number', 0],
 	});
 
 var azCliLibDir = path.dirname(require.resolve('azure-cli'));
@@ -203,6 +204,10 @@ function getAzureDNSRecords(resourceGroup, zoneName, callback) {
 					throw new Error('Unknown azure property: ' + propName);
 				}
 
+				if (recordSet.properties[propName].length === 0) {
+					continue;
+				}
+
 				if (typeof records[path] !== 'object') {
 					records[path] = {};
 				}
@@ -295,7 +300,35 @@ function compareRecordSetsAndApplyActions() {
 					var azRecord = getAzureRecordFromRecordSet(parsedCSVRecords[path][type].values[record], azRecordSet);
 
 					if (null === azRecord) {
-						recordActions.createAndUpdate.push({ path: path, type: type, reason: 'no-matching-record', record: parsedCSVRecords[path][type].values[record] });
+						recordActions.createAndUpdate.push({ path: path, type: type, reason: 'no-matching-remote-record', record: parsedCSVRecords[path][type].values[record] });
+					}
+				}
+			}
+		}
+	}
+
+	// Find records to remove
+	for (var path in parsedAzureRecords) {
+		for (var type in parsedAzureRecords[path]) {
+			var recordSet = null;
+			if (typeof parsedCSVRecords[path] !== 'undefined' && typeof parsedCSVRecords[path][type] !== 'undefined') {
+				recordSet = parsedCSVRecords[path][type];
+			}
+
+			// If the record doesn't exist, it will need to be added
+			if (recordSet === null || typeof recordSet === 'undefined') {
+				recordSetActions.remove.push({ path: path, type: type, reason: 'no-matching-local-record-set', record: parsedAzureRecords[path][type] });
+
+				for (var record in parsedAzureRecords[path][type].values) {
+					recordActions.remove.push({ path: path, type: type, reason: 'remove-record-set', record: parsedAzureRecords[path][type].values[record] });
+				}
+			} else {
+				// Loop through the individual records in the record set and mark actions
+				for (var record in parsedAzureRecords[path][type].values) {
+					var azRecord = getAzureRecordFromRecordSet(parsedAzureRecords[path][type].values[record], recordSet);
+
+					if (null === azRecord) {
+						recordActions.remove.push({ path: path, type: type, reason: 'no-matching-local-record', record: parsedAzureRecords[path][type].values[record] });
 					}
 				}
 			}
@@ -341,13 +374,17 @@ function summarizeRecordValue(record, type) {
 	var keys = Object.keys(record);
 	if (keys.length === 0) {
 		return '-';
-	} else if (keys.length === 1) {
-		return record[keys[0]];
 	}
 
 	var summary = [];
 	for (var prop in record) {
-		summary.push(util.format('%s: %s', prop, record[prop]));
+		var value = record[prop];
+
+		if (options.summarizeCharLimit > 0 && record[prop].length > options.summarizeCharLimit) {
+			value = record[prop].substring(0, options.summarizeCharLimit) + "...";
+		}
+
+		summary.push(util.format('%s: %s', prop, value));
 	}
 
 	return summary.join(', ');
