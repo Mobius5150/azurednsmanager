@@ -17,7 +17,6 @@
 	*/
 
 var fs = require('fs');
-var azure = require('azure');
 var azureCommon = require('azure-common');
 var azureDns = require('azure-arm-dns');
 var csv = require('csv');
