@@ -17,7 +17,7 @@
 	*/
 
 var fs = require('fs');
-var azureCommon = requirxe('azure-common');
+var azureCommon = require('azure-common');
 var azureDns = require('azure-arm-dns');
 var csv = require('csv');
 var Table = require('cli-table');
@@ -62,7 +62,7 @@ var ParseRecordsOptions = {
 var RecordTypeData = {
 	'NS':    { dataMap: { nsdname: 'data' }, typeName: 'Microsoft.Network/dnszones', propertyName: 'nsRecords' },
 	'A':     { dataMap: { ipv4Address: 'data' }, typeName: 'Microsoft.Network/dnszones/A', propertyName: 'aRecords' },
-	'MX':    { dataMap: { exchange: 'data', preference: 'unknownFirst' }, typeName: 'Microsoft.Network/dnszones/MX', propertyName: 'mxRecords' },
+	'MX':    { dataMap: { exchange: 'data', preference: { name: 'unknownFirst', parser: parseInt } }, typeName: 'Microsoft.Network/dnszones/MX', propertyName: 'mxRecords' },
 	'AAAA':  { dataMap: { ipv6Address: 'data' }, typeName: 'Microsoft.Network/dnszones/AAAA', propertyName: 'aaaaRecords' },
 	'PTR':   { dataMap: { ptrdname: 'data' }, typeName: 'Microsoft.Network/dnszones/PTR', propertyName: 'ptrRecords' },
 	'SRV':   { 
@@ -103,15 +103,15 @@ cli.main(function Main(args, opts) {
 		// cli.spinner('');
 
 		cli.spinner('Loading records file...');
-		getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
-			handleParseAzureRecordsComplete.apply(this, arguments);
+		parseRecordsFile(options.recordsFile, function() {
 			cli.spinner('Loading records file... Done!', true);
+			handleParseRecordsComplete.apply(this, arguments);
 
 			cli.spinner('Querying Azure for DNS Information...');
 
-			parseRecordsFile(options.recordsFile, function() {
+			getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
 				cli.spinner('Querying Azure for DNS Information... Done!', true);
-				handleParseRecordsComplete.apply(this, arguments);
+				handleParseAzureRecordsComplete.apply(this, arguments);
 			});
 		});
 	});
@@ -195,7 +195,7 @@ function getAzureDNSRecords(resourceGroup, zoneName, callback) {
 					continue;
 				}
 
-				var path = recordSet.properties.name;
+				var path = recordSet.name;
 				var type = getTypeNameFromAzurePropertyName(propName);
 
 				if (type === null) {
@@ -450,11 +450,22 @@ function getRecordTypeValue(recordData) {
 
 	var returnValue = {};
 	for (var propName in RecordTypeData[recordData.type].dataMap) {
-		if (typeof recordData[RecordTypeData[recordData.type].dataMap[propName]] === 'undefined') {
+		var type = RecordTypeData[recordData.type].dataMap[propName];
+		var name = type;
+
+		if (typeof type !== 'string') {
+			name = type.name;
+		}
+
+		if (typeof recordData[name] === 'undefined') {
 			throw new Error("Property " + propName + " cannot be empty for DNS " + recordData.type + " record")
 		}
 
-		returnValue[propName] = recordData[RecordTypeData[recordData.type].dataMap[propName]];
+		if (typeof type === 'string') {
+			returnValue[propName] = recordData[name];
+		} else {
+			returnValue[propName] = type.parser(recordData[name]);
+		}
 	}
 
 	return returnValue;
