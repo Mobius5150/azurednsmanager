@@ -75,7 +75,7 @@ var RecordTypeData = {
 	'CNAME': { dataMap: { cname: 'data' }, typeName: 'Microsoft.Network/dnszones/CNAME', propertyName: 'cnameRecords' },
 };
 
-cli.main(function(args, opts) {
+cli.main(function Main(args, opts) {
 	options = opts;
 
 	if (cli.args.length < 1) {
