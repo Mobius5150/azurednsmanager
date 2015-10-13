@@ -38,12 +38,12 @@ cli .parse({
 	    fileEncoding:  ['e', 'The encoding for the DNS Records Text File', 'string', 'utf8'],
 	});
 
-var cliLibDir = path.dirname(require.resolve('azure-cli'));
-var cliAdalAuthPath = path.join(cliLibDir, "/util/authentication/adalAuth.js");
-var cliProfilePath = path.join(cliLibDir, "/util/profile/profile.js");
+var azCliLibDir = path.dirname(require.resolve('azure-cli'));
+var azCliAdalAuthPath = path.join(azCliLibDir, "/util/authentication/adalAuth.js");
+var azCliProfilePath = path.join(azCliLibDir, "/util/profile/profile.js");
 
-var auth = require(cliAdalAuthPath);
-var profile = require(cliProfilePath);
+var auth = require(azCliAdalAuthPath);
+var profile = require(azCliProfilePath);
 
 function loadDefaultProfile(callback) {
 	if (typeof callback !== 'function') {
@@ -88,6 +88,7 @@ function loadDefaultProfile(callback) {
 		}
 
 		if (token === null) {
+			cli.error('Could not find valid Azure auth token from Azure CLI. Please run `azure login` and try again.');
 			callback(new Error('Could not find valid Azure auth token from Azure CLI. Please run `azure login` and try again.'), null);
 			return;
 		}
