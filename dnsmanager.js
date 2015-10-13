@@ -17,7 +17,7 @@
 	*/
 
 var fs = require('fs');
-var azureCommon = require('azure-common');
+var azureCommon = requirxe('azure-common');
 var azureDns = require('azure-arm-dns');
 var csv = require('csv');
 var Table = require('cli-table');
@@ -43,6 +43,79 @@ var azCliProfilePath = path.join(azCliLibDir, "/util/profile/profile.js");
 
 var auth = require(azCliAdalAuthPath);
 var profile = require(azCliProfilePath);
+
+var ParseRecordsOptions = {
+	comment: '#',
+	delimiter: ' ',
+	trim: true,
+	columns: [
+		'path',
+		'type',
+		'ttl', 
+		'data',
+		'unknownFirst', // MX Priority 
+		'unknownSecond', // SRV Weight
+		'unknownThird', // SRV priority
+	]
+};
+
+var RecordTypeData = {
+	'NS':    { dataMap: { nsdname: 'data' }, typeName: 'Microsoft.Network/dnszones', propertyName: 'nsRecords' },
+	'A':     { dataMap: { ipv4Address: 'data' }, typeName: 'Microsoft.Network/dnszones/A', propertyName: 'aRecords' },
+	'MX':    { dataMap: { exchange: 'data', preference: 'unknownFirst' }, typeName: 'Microsoft.Network/dnszones/MX', propertyName: 'mxRecords' },
+	'AAAA':  { dataMap: { ipv6Address: 'data' }, typeName: 'Microsoft.Network/dnszones/AAAA', propertyName: 'aaaaRecords' },
+	'PTR':   { dataMap: { ptrdname: 'data' }, typeName: 'Microsoft.Network/dnszones/PTR', propertyName: 'ptrRecords' },
+	'SRV':   { 
+		dataMap: { 
+			target: 'data', 
+			port: 'unknownFirst', 
+			weight: 'unknownSecond', 
+			priority: 'unknownThird' }, typeName: 'Microsoft.Network/dnszones/SRV', propertyName: 'srvRecords' },
+	'TXT':   { dataMap: { value: 'data' }, typeName: 'Microsoft.Network/dnszones/TXT', propertyName: 'txtRecords' },
+	'CNAME': { dataMap: { cname: 'data' }, typeName: 'Microsoft.Network/dnszones/CNAME', propertyName: 'cnameRecords' },
+};
+
+cli.main(function(args, opts) {
+	options = opts;
+
+	if (cli.args.length < 1) {
+		cli.error('resourceGroup must be specified. Use -h for help.');
+		return;
+	}
+
+	if (cli.args.length < 2) {
+		cli.error('zoneName must be specified. Use -h for help.');
+		return;
+	}
+
+	options.resourceGroup = cli.args.shift();
+	options.zoneName = cli.args.shift();
+
+	loadDefaultProfile(function(error, creds) {
+		if (error) {
+			throw error;
+		}
+
+		credentials = creds;
+
+		cli.info(util.format('Loaded credential for "%s"', credentials.credentials.fullToken.userId));
+		// cli.info('Loading records file and querying Azure for DNS Information...')
+		// cli.spinner('');
+
+		cli.spinner('Loading records file...');
+		getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
+			handleParseAzureRecordsComplete.apply(this, arguments);
+			cli.spinner('Loading records file... Done!', true);
+
+			cli.spinner('Querying Azure for DNS Information...');
+
+			parseRecordsFile(options.recordsFile, function() {
+				cli.spinner('Querying Azure for DNS Information... Done!', true);
+				handleParseRecordsComplete.apply(this, arguments);
+			});
+		});
+	});
+});
 
 function loadDefaultProfile(callback) {
 	if (typeof callback !== 'function') {
@@ -100,78 +173,6 @@ function loadDefaultProfile(callback) {
 		}));
 	}
 }
-
-cli.main(function(args, opts) {
-	options = opts;
-
-	if (cli.args.length < 1) {
-		cli.error('resourceGroup must be specified. Use -h for help.');
-		return;
-	}
-
-	if (cli.args.length < 2) {
-		cli.error('zoneName must be specified. Use -h for help.');
-		return;
-	}
-
-	options.resourceGroup = cli.args.shift();
-	options.zoneName = cli.args.shift();
-
-	loadDefaultProfile(function(error, creds) {
-		if (error) {
-			throw error;
-		}
-
-		credentials = creds;
-
-		cli.info(util.format('Loaded credential for "%s"', credentials.credentials.fullToken.userId));
-		// cli.info('Loading records file and querying Azure for DNS Information...')
-		// cli.spinner('');
-
-		cli.spinner('Loading records file...');
-		getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
-			handleParseAzureRecordsComplete.apply(this, arguments);
-			cli.spinner('Loading records file... Done!', true);
-
-			cli.spinner('Querying Azure for DNS Information...');
-
-			parseRecordsFile(options.recordsFile, function() {
-				cli.spinner('Querying Azure for DNS Information... Done!', true);
-				handleParseRecordsComplete.apply(this, arguments);
-			});
-		});
-	});
-});
-
-var ParseRecordsOptions = {
-	comment: '#',
-	delimiter: ' ',
-	trim: true,
-	columns: [
-		'path',
-		'type',
-		'ttl', 
-		'data',
-		'unknownFirst', // MX Priority, 
-		'unknownSecond'
-	]
-};
-
-var RecordTypeData = {
-	'NS':    { dataMap: { nsdname: 'data' }, typeName: 'Microsoft.Network/dnszones', propertyName: 'nsRecords' },
-	'A':     { dataMap: { ipv4Address: 'data' }, typeName: 'Microsoft.Network/dnszones/A', propertyName: 'aRecords' },
-	'MX':    { dataMap: { exchange: 'data', preference: 'unknownFirst' }, typeName: 'Microsoft.Network/dnszones/MX', propertyName: 'mxRecords' },
-	'AAAA':  { dataMap: { ipv6Address: 'data' }, typeName: 'Microsoft.Network/dnszones/AAAA', propertyName: 'aaaaRecords' },
-	'PTR':   { dataMap: { ptrdname: 'data' }, typeName: 'Microsoft.Network/dnszones/PTR', propertyName: 'ptrRecords' },
-	'SRV':   { 
-		dataMap: { 
-			target: 'data', 
-			port: 'unknownFirst', 
-			weight: 'unknownSecond', 
-			priority: 'unknownThird' }, typeName: 'Microsoft.Network/dnszones/SRV', propertyName: 'srvRecords' },
-	'TXT':   { dataMap: { value: 'data' }, typeName: 'Microsoft.Network/dnszones/TXT', propertyName: 'txtRecords' },
-	'CNAME': { dataMap: { cname: 'data' }, typeName: 'Microsoft.Network/dnszones/CNAME', propertyName: 'cnameRecords' },
-};
 
 function getAzureDNSRecords(resourceGroup, zoneName, callback) {
 	if (typeof callback !== 'function') {
