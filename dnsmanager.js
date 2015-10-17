@@ -185,6 +185,8 @@ function handleParseRecordsComplete(error, records) {
 
 	if (!options.dryrun) {
 		lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions);
+	} else {
+		cli.info('Exiting without applying actions');
 	}
 }
 
@@ -199,6 +201,8 @@ function handleParseAzureRecordsComplete(error, records) {
 
 	if (!options.dryrun) {
 		lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions);
+	} else {
+		cli.info('Exiting without applying actions');
 	}
 }
 
