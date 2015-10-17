@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
 	Copyright 2015 Michael Blouin contact@michaelblouin.ca
 	
@@ -23,20 +21,7 @@ var csv = require('csv');
 var Table = require('cli-table');
 var util = require('util');
 var path = require('path');
-
-var options = null;
-
-var parsedCSVRecords = null;
-var parsedAzureRecords = null;
-
-var cli = require('cli')
-	.enable('status')
-	.setUsage('dnsmanager [resourceGroup] [zoneName] [OPTIONS]');
-cli .parse({
-	    recordsFile:   ['f', 'The path to the file with DNS Records', 'file', './records.txt'],
-	    fileEncoding:  ['e', 'The encoding for the DNS Records Text File', 'string', 'utf8'],
-	    summarizeCharLimit: ['s', 'The maximum number of characters in a value before truncation (0 for unlimited)', 'number', 0],
-	});
+var cli = null;
 
 var azCliLibDir = path.dirname(require.resolve('azure-cli'));
 var azCliAdalAuthPath = path.join(azCliLibDir, "/util/authentication/adalAuth.js");
@@ -44,6 +29,9 @@ var azCliProfilePath = path.join(azCliLibDir, "/util/profile/profile.js");
 
 var auth = require(azCliAdalAuthPath);
 var profile = require(azCliProfilePath);
+
+var credentials = null;
+var options = null;
 
 var ParseRecordsOptions = {
 	comment: '#',
@@ -75,49 +63,6 @@ var RecordTypeData = {
 	'TXT':   { dataMap: { value: 'data' }, typeName: 'Microsoft.Network/dnszones/TXT', propertyName: 'txtRecords' },
 	'CNAME': { dataMap: { cname: 'data' }, typeName: 'Microsoft.Network/dnszones/CNAME', propertyName: 'cnameRecords' },
 };
-
-cli.main(function Main(args, opts) {
-	options = opts;
-
-	if (cli.args.length < 1) {
-		cli.error('resourceGroup must be specified. Use -h for help.');
-		return;
-	}
-
-	if (cli.args.length < 2) {
-		cli.error('zoneName must be specified. Use -h for help.');
-		return;
-	}
-
-	options.resourceGroup = cli.args.shift();
-	options.zoneName = cli.args.shift();
-
-	loadDefaultProfile(function(error, creds) {
-		if (error) {
-			if (error === true) return;
-			throw error;
-		}
-
-		credentials = creds;
-
-		cli.info(util.format('Loaded credential for "%s"', credentials.credentials.fullToken.userId));
-		// cli.info('Loading records file and querying Azure for DNS Information...')
-		// cli.spinner('');
-
-		cli.spinner('Loading records file...');
-		parseRecordsFile(options.recordsFile, function() {
-			cli.spinner('Loading records file... Done!', true);
-			handleParseRecordsComplete.apply(this, arguments);
-
-			cli.spinner('Querying Azure for DNS Information...');
-
-			getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
-				cli.spinner('Querying Azure for DNS Information... Done!', true);
-				handleParseAzureRecordsComplete.apply(this, arguments);
-			});
-		});
-	});
-});
 
 function loadDefaultProfile(callback) {
 	if (typeof callback !== 'function') {
@@ -236,27 +181,7 @@ function getTypeNameFromAzurePropertyName(propName) {
 	return null;
 }
 
-function handleParseRecordsComplete(error, records) {
-	if (error) {
-		throw error;
-	}
-
-	parsedCSVRecords = records;
-
-	compareRecordSetsAndApplyActions();
-}
-
-function handleParseAzureRecordsComplete(error, records) {
-	if (error) {
-		throw error;
-	}
-
-	parsedAzureRecords = records;
-
-	compareRecordSetsAndApplyActions();
-}
-
-function compareRecordSetsAndApplyActions() {
+function compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords) {
 	if (parsedCSVRecords === null) {
 		return;
 	}
@@ -368,6 +293,11 @@ function compareRecordSetsAndApplyActions() {
 	} else {
 		cli.info("DNS records in sync. No actions to perform.")
 	}
+
+	return {
+		recordActions: recordActions,
+		recordSetActions: recordSetActions,
+	};
 }
 
 function summarizeRecordValue(record, type) {
@@ -512,3 +442,29 @@ function getRecordTypeValue(recordData) {
 
 	return returnValue;
 }
+
+function setOptions (opts) { options = opts; }
+function setCredentials (creds) { credentials = creds; }
+function setCLI (c) { cli = c; }
+
+module.exports = {
+	init: function init(opts, cli, creds) {
+		setOptions(opts);
+		setCredentials(creds);
+		setCLI(cli);
+
+		return {
+			setCLI: setCLI,
+			setOptions: setOptions,
+			setCredentials: setCredentials,
+			loadDefaultProfile: loadDefaultProfile,
+			getAzureDNSRecords: getAzureDNSRecords,
+			getTypeNameFromAzurePropertyName: getTypeNameFromAzurePropertyName,
+			compareRecordSetsAndGetActions: compareRecordSetsAndGetActions,
+			summarizeRecordValue: summarizeRecordValue,
+			getAzureRecordFromRecordSet: getAzureRecordFromRecordSet,
+			parseRecordsFile: parseRecordsFile,
+			getRecordTypeValue: getRecordTypeValue,
+		};
+	}
+};
