@@ -414,6 +414,69 @@ function parseRecordsFile(fileFullPath, callback) {
 	});
 }
 
+function writeRecordsFile(fileFullPath, records, prefix, callback) {
+	if (typeof fileFullPath !== 'string') {
+		throw new Error('writeRecordsFile fileFullPath should be of type string.');
+	}
+	
+	if (typeof records !== 'object') {
+		throw new Error('writeRecordsFile records should be an array of objects.');
+	}
+
+	if (typeof prefix !== 'string') {
+		throw new Error('writeRecordsFile prefix should be of type string.');
+	}
+
+	if (typeof callback !== 'function') {
+		throw new Error('writeRecordsFile callback should be of type function.');
+	}
+
+	var csvArray = [];
+
+	for (var path in records) {
+		for (var type in records[path]) {
+			for (var v in records[path][type].values) {
+				var obj = {
+					'path': path,
+					'type': type,
+					'ttl': records[path][type].ttl,
+				};
+
+				for (var srcField in RecordTypeData[type].dataMap) {
+					var destField = RecordTypeData[type].dataMap[srcField];
+
+					if (typeof destField === 'object') {
+						obj[destField.name] = records[path][type].values[v][srcField];
+					} else {
+						obj[destField] = records[path][type].values[v][srcField];
+					}
+				}
+
+				csvArray.push(obj);
+			}
+		}
+	}
+
+	csv.stringify(csvArray, ParseRecordsOptions, function writeCSVRecordsToFile(error, dataStr) {
+		if (error) {
+			callback(error);
+		}
+
+		if (null !== prefix && prefix.length !== 0 && prefix[prefix.length - 1] !== '\n') {
+			prefix = prefix + '\n';
+		}
+
+		if (fileFullPath === 'stdout') {
+			console.log(prefix + dataStr);
+			callback(null);
+		} else {
+			fs.writeFile(fileFullPath, prefix + dataStr, options.fileEncoding, function csvRecordsWrittenToFile(error) {
+				callback(error);
+			});
+		}
+	});
+}
+
 // Gets the value object for the API for the given record type
 function getRecordTypeValue(recordData) {
 	if (typeof RecordTypeData[recordData.type] === 'undefined') {
@@ -465,6 +528,7 @@ module.exports = {
 			getAzureRecordFromRecordSet: getAzureRecordFromRecordSet,
 			parseRecordsFile: parseRecordsFile,
 			getRecordTypeValue: getRecordTypeValue,
+			writeRecordsFile: writeRecordsFile,
 		};
 	}
 };

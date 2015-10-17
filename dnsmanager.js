@@ -15,6 +15,7 @@ cli .parse({
 	    recordsFile:   ['f', 'The path to the file with DNS Records', 'file', './records.txt'],
 	    fileEncoding:  ['e', 'The encoding for the DNS Records Text File', 'string', 'utf8'],
 	    summarizeCharLimit: ['s', 'The maximum number of characters in a value before truncation (0 for unlimited)', 'number', 0],
+	    outfile:            [false, 'The file to output records to if in import mode', 'string', 'stdout'],
 	});
 
 cli.main(function Main(args, opts) {
@@ -53,12 +54,12 @@ cli.main(function Main(args, opts) {
 			cli.spinner('Loading records file... Done!', true);
 			handleParseRecordsComplete.apply(this, arguments);
 
-			cli.spinner('Querying Azure for DNS Information...');
+			// cli.spinner('Querying Azure for DNS Information...');
 
-			lib.getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
-				cli.spinner('Querying Azure for DNS Information... Done!', true);
-				handleParseAzureRecordsComplete.apply(this, arguments);
-			});
+			// lib.getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
+			// 	cli.spinner('Querying Azure for DNS Information... Done!', true);
+			// 	handleParseAzureRecordsComplete.apply(this, arguments);
+			// });
 		});
 	});
 });
@@ -69,6 +70,14 @@ function handleParseRecordsComplete(error, records) {
 	}
 
 	parsedCSVRecords = records;
+
+	lib.writeRecordsFile(options.outfile, records, "# Hello World!\n", function (error) {
+		if (error) {
+			throw error;
+		}
+
+		console.log("Write complete: ", records['@']['MX']);
+	});
 
 	lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
 }
