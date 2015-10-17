@@ -10,59 +10,146 @@ var parsedAzureRecords = null;
 var util = require('util');
 var cli = require('cli')
 	.enable('status')
-	.setUsage('dnsmanager [resourceGroup] [zoneName] [OPTIONS]');
 cli .parse({
-	    recordsFile:   ['f', 'The path to the file with DNS Records', 'file', './records.txt'],
-	    fileEncoding:  ['e', 'The encoding for the DNS Records Text File', 'string', 'utf8'],
-	    summarizeCharLimit: ['s', 'The maximum number of characters in a value before truncation (0 for unlimited)', 'number', 0],
-	    outfile:            [false, 'The file to output records to if in import mode', 'string', 'stdout'],
+		resourceGroup:      ['g', 'The Azure resource group to query', 'string'],
+		zoneName: 		    ['n', 'The Azure zone name to query', 'string'],
+	    recordsFile:        ['f', 'The path to the file with DNS Records', 'file', './records.txt'],
+	    fileEncoding:       ['e', 'The encoding for the DNS Records Text File', 'string', 'utf8'],
+	    summarizeCharLimit: ['c', 'The maximum number of characters in a value before truncation (0 for unlimited)', 'number', 0],
+	    dryrun:				[false, 'Outputs only what actions would be taken, but does not perform them', 'bool', false],
+
+	    import: 			['i', 'Whether to run in import mode', 'bool', false],
+	    source: 			['s', 'The source when running an import. Can be "DNS" or "Azure"', 'string', 'Azure'],
+	    outfile:            [false, 'The file to output records to if in import mode, or "stdout" to pipe to stdout', 'string'],
+	    ttl: 				['t', 'The default TTL to use for entries during a DNS import.', 'int'],
 	});
 
 cli.main(function Main(args, opts) {
 	options = opts;
 
-	if (cli.args.length < 1) {
-		cli.error('resourceGroup must be specified. Use -h for help.');
-		return;
+	if (!options.import && null !== options.outfile) {
+		cli.fatal('Refusing to do anything because an output file was specific but CLI is not in import mode. Please remove the --outfile option or specify -i true');
+	} else if (options.import && null === options.outfile) {
+		cli.fatal('You must specify an outfile to run in import mode. See --help.');
 	}
-
-	if (cli.args.length < 2) {
-		cli.error('zoneName must be specified. Use -h for help.');
-		return;
-	}
-
-	options.resourceGroup = cli.args.shift();
-	options.zoneName = cli.args.shift();
 
 	lib = require('./dnsmanlib.js').init(options, cli, null);
 
-	lib.loadDefaultProfile(function(error, creds) {
+	if (options.import) {
+		runImportMode(options);
+	} else {
+		runActionMode(options);
+	}
+});
+
+function runActionMode(options) {
+	if (typeof options.resourceGroup !== 'string') {
+		cli.fatal('resourceGroup must be specified. Use -h for help.');
+		return;
+	}
+
+	if (typeof options.zoneName !== 'string') {
+		cli.fatal('zoneName must be specified. Use -h for help.');
+		return;
+	}
+
+	if (options.dryrun) {
+		cli.info('Running in action dry run mode');
+	} else {
+		cli.info('Running in action application mode');
+	}
+
+	loadDefaultAzureCredential(function(error, creds) {
 		if (error) {
 			if (error === true) return;
 			throw error;
 		}
-
-		credentials = creds;
-		lib.setCredentials(credentials);
-
-		cli.info(util.format('Loaded credential for "%s"', credentials.credentials.fullToken.userId));
-		// cli.info('Loading records file and querying Azure for DNS Information...')
-		// cli.spinner('');
 
 		cli.spinner('Loading records file...');
 		lib.parseRecordsFile(options.recordsFile, function() {
 			cli.spinner('Loading records file... Done!', true);
 			handleParseRecordsComplete.apply(this, arguments);
 
-			// cli.spinner('Querying Azure for DNS Information...');
+			cli.spinner('Querying Azure for DNS Information...');
 
-			// lib.getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
-			// 	cli.spinner('Querying Azure for DNS Information... Done!', true);
-			// 	handleParseAzureRecordsComplete.apply(this, arguments);
-			// });
+			lib.getAzureDNSRecords(options.resourceGroup, options.zoneName, function() {
+				cli.spinner('Querying Azure for DNS Information... Done!', true);
+				handleParseAzureRecordsComplete.apply(this, arguments);
+			});
 		});
 	});
-});
+}
+
+function runImportMode(options) {
+	if (options.source !== 'Azure' && options.source !== 'DNS') {
+		cli.fatal('Import source must be either "Azure" or "DNS"');
+	}
+
+	if (options.source === 'Azure' && typeof options.resourceGroup !== 'string') {
+		cli.fatal('resourceGroup must be specified. Use -h for help.');
+	}
+
+	if (typeof options.zoneName !== 'string') {
+		if (options.source === 'Azure') {
+			cli.fatal('zoneName must be specified. Use -h for help.');
+			return;
+		} else if (options.source === 'DNS') {
+			cli.fatal('DNS name must be specific with the -z option. Use -h for help.');
+		}
+	}
+
+	if (options.source === 'DNS' && (typeof options.ttl !== 'number' || options.ttl <= 0)) {
+		cli.fatal('TTL must be given with the -t or --ttl flags, and must be greater than zero when doing a DNS import.');
+	}
+
+	cli.info('Running in import mode');
+
+	var prefix = "# Imported DNS records from ";
+	if (options.source === 'DNS') {
+		prefix += options.zoneName + " DNS";
+	} else {
+		prefix += options.zoneName + 'zone in Azure';
+	}
+
+	if (options.source === 'Azure') {
+		loadDefaultAzureCredential(function(error, creds) {
+			if (error) {
+				if (error === true) return;
+				throw error;
+			}
+			lib.getAzureDNSRecords(options.resourceGroup, options.zoneName, function importHandleAzureRecords(error, records) {
+				if (error) {
+					throw error;
+				}
+
+				lib.writeRecordsFile(options.outfile, records, prefix, handleImportRecordsWritten);
+			});
+		});
+	} else if (options.source === 'DNS') {
+		var paths = [ '@' ];
+		lib.getSourceDNSRecords(options.zoneName, paths, function importHandleSourceDNSRecords(error, records) {
+			if (error) {
+				throw error;
+			}
+
+			for (var path in records) {
+				for (var type in records[path]) {
+					records[path][type].ttl = options.ttl;
+				}
+			}
+
+			lib.writeRecordsFile(options.outfile, records, prefix, handleImportRecordsWritten);
+		});
+	}
+}
+
+function handleImportRecordsWritten(error) {
+	if (error) {
+		throw error;
+	}
+
+	cli.ok('Import complete! Results written to ' + options.outfile);
+}
 
 function handleParseRecordsComplete(error, records) {
 	if (error) {
@@ -71,15 +158,11 @@ function handleParseRecordsComplete(error, records) {
 
 	parsedCSVRecords = records;
 
-	lib.writeRecordsFile(options.outfile, records, "# Hello World!\n", function (error) {
-		if (error) {
-			throw error;
-		}
+	var actions = lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
 
-		console.log("Write complete: ", records['@']['MX']);
-	});
-
-	lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
+	if (!options.dryrun) {
+		lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions);
+	}
 }
 
 function handleParseAzureRecordsComplete(error, records) {
@@ -89,5 +172,29 @@ function handleParseAzureRecordsComplete(error, records) {
 
 	parsedAzureRecords = records;
 
-	lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
+	var actions = lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
+
+	if (!options.dryrun) {
+		lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions);
+	}
+}
+
+function loadDefaultAzureCredential(callback) {
+	if (typeof callback !== 'function') {
+		throw new Error('loadDefaultAzureCredential callback must be a function');
+	}
+
+	lib.loadDefaultProfile(function(error, creds) {
+		if (error) {
+			callback(error);
+			return;
+		}
+
+		credentials = creds;
+		lib.setCredentials(credentials);
+
+		cli.ok(util.format('Loaded credential for "%s"', credentials.credentials.fullToken.userId));
+
+		callback(null);
+	});
 }

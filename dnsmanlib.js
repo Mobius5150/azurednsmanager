@@ -51,7 +51,7 @@ var ParseRecordsOptions = {
 var RecordTypeData = {
 	'NS':    { dataMap: { nsdname: 'data' }, typeName: 'Microsoft.Network/dnszones', propertyName: 'nsRecords' },
 	'A':     { dataMap: { ipv4Address: 'data' }, typeName: 'Microsoft.Network/dnszones/A', propertyName: 'aRecords' },
-	'MX':    { dataMap: { exchange: 'data', preference: { name: 'unknownFirst', parser: parseInt } }, typeName: 'Microsoft.Network/dnszones/MX', propertyName: 'mxRecords' },
+	'MX':    { dataMap: { exchange: 'data', preference: { name: 'unknownFirst', parser: parseInt, dnsName: 'priority' } }, typeName: 'Microsoft.Network/dnszones/MX', propertyName: 'mxRecords' },
 	'AAAA':  { dataMap: { ipv6Address: 'data' }, typeName: 'Microsoft.Network/dnszones/AAAA', propertyName: 'aaaaRecords' },
 	'PTR':   { dataMap: { ptrdname: 'data' }, typeName: 'Microsoft.Network/dnszones/PTR', propertyName: 'ptrRecords' },
 	'SRV':   { 
@@ -506,6 +506,120 @@ function getRecordTypeValue(recordData) {
 	return returnValue;
 }
 
+function getSourceDNSRecords(dnsName, paths, callback) {
+	if (typeof dnsName !== 'string') {
+		throw new Error('getSourceDNSRecords dnsName must be a string');
+	} else if (typeof callback !== 'function') {
+		throw new Error('getSourceDNSRecords callback must be a function');
+	}
+
+	var records = {};
+
+	if (Object.keys(paths).length === 0) {
+		console.warn('Did not run DNS queries for any paths');
+		callback(null, {});
+		return;
+	}
+
+	for (var p in paths) {
+		getSourceDNSRecordsForPath(dnsName, paths[p], function handleDnsForPath(error, path, pathRecords) {
+			if (error) {
+				callback(error, null);
+				return;
+			}
+
+			records[path] = pathRecords;
+
+			if (Object.keys(records).length === paths.length) {
+				callback(null, records);
+			}
+		});
+	}
+}
+
+function getSourceDNSRecordsForPath(dnsName, path, callback) {
+	var dns = require('dns');
+
+	var index = -1;
+
+	var types = Object.keys(RecordTypeData);
+
+	if (types.length === 0) {
+		throw new Error('Expected more record types... This is a code error.');
+	}
+
+	var pathRecords = {};
+
+	var resolvePath = util.format('%s.%s', path, dnsName);
+
+	if (path === '@') {
+		resolvePath = dnsName;
+	}
+
+	function next(error, addrs) {
+		if (error && error.code !== dns.NODATA) {
+			callback(error);
+			return;
+		}
+		
+		if (null !== addrs && typeof addrs === 'object' && addrs.length > 0) {
+			pathRecords[types[index]] = { values: applyObjectField(types[index], addrs) };
+		}
+
+		++index;
+
+		if (types[index] === 'PTR') {
+			++index;
+		}
+
+		if (index === types.length) {
+			callback(null, path, pathRecords);
+			return;
+		}
+
+		cli.info(util.format('Querying %s %s records...', resolvePath, types[index]));
+		dns.resolve(resolvePath, types[index], next);
+	}
+
+	function applyObjectField(type, values) {
+		var outvals = [];
+
+		if (Object.keys(RecordTypeData[type].reverseMap).length !== 1) {
+			for (var v in values) {
+				var obj = {};
+
+				for (var propName in RecordTypeData[type].dataMap) {
+					var sourceName = propName;
+
+					if (typeof RecordTypeData[type].dataMap[propName] === 'object' && typeof RecordTypeData[type].dataMap[propName].dnsName === 'string') {
+						sourceName = RecordTypeData[type].dataMap[propName].dnsName;
+					}
+
+					obj[propName] = values[v][sourceName];
+				}
+
+				outvals.push(obj);
+			}
+		} else {
+			for (var v in values) {
+				var obj = {};
+
+				if (type === 'TXT') {
+					obj[RecordTypeData[type].reverseMap['data']] = values[v].join('');
+				} else {
+					obj[RecordTypeData[type].reverseMap['data']] = values[v];
+				}
+				
+				outvals.push(obj);
+			}
+		}
+
+		return outvals;
+	}
+
+	next(null, null);
+}
+
 function setOptions (opts) { options = opts; }
 function setCredentials (creds) { credentials = creds; }
 function setCLI (c) { cli = c; }
@@ -516,7 +630,21 @@ module.exports = {
 		setCredentials(creds);
 		setCLI(cli);
 
+		for (var t in RecordTypeData) {
+			RecordTypeData[t].reverseMap = {};
+
+			for (var propName in RecordTypeData[t].dataMap) {
+				var index = RecordTypeData[t].dataMap[propName];
+				if (typeof index === 'object') {
+					index = index.name;
+				}
+
+				RecordTypeData[t].reverseMap[index] = propName;
+			}
+		}
+
 		return {
+			RecordTypeData: RecordTypeData,
 			setCLI: setCLI,
 			setOptions: setOptions,
 			setCredentials: setCredentials,
@@ -529,6 +657,7 @@ module.exports = {
 			parseRecordsFile: parseRecordsFile,
 			getRecordTypeValue: getRecordTypeValue,
 			writeRecordsFile: writeRecordsFile,
+			getSourceDNSRecords: getSourceDNSRecords,
 		};
 	}
 };
