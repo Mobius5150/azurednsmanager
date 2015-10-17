@@ -38,6 +38,7 @@ cli .parse({
 	    source: 			['s', 'The source when running an import. Can be "DNS" or "Azure"', 'string', 'Azure'],
 	    outfile:            [false, 'The file to output records to if in import mode, or "stdout" to pipe to stdout', 'string'],
 	    ttl: 				['t', 'The default TTL to use for entries during a DNS import.', 'int'],
+	    paths: 				['p', 'A csv list of subdomains/prefixes to query for during a DNS import. Should not include the TLD. Example: -p="foo,hello.world" to import the records from foo.example.com and hello.world.example.com', 'string']
 	});
 
 cli.main(function Main(args, opts) {
@@ -143,6 +144,12 @@ function runImportMode(options) {
 		});
 	} else if (options.source === 'DNS') {
 		var paths = [ '@' ];
+
+		var pathList = options.paths.split(',');
+		for (var p in pathList) {
+			paths.push(pathList[p]);
+		}
+
 		lib.getSourceDNSRecords(options.zoneName, paths, function importHandleSourceDNSRecords(error, records) {
 			if (error) {
 				throw error;
