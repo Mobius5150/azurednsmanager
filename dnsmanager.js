@@ -185,10 +185,12 @@ function handleParseRecordsComplete(error, records) {
 
 	var actions = lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
 
-	if (!options.dryrun) {
-		lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions);
-	} else {
-		cli.info('Exiting without applying actions');
+	if (null !== actions && typeof actions !== 'undefined') {
+		if (!options.dryrun) {
+			lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions, handleActionsApplied);
+		} else {
+			cli.info('Exiting without applying actions');
+		}
 	}
 }
 
@@ -201,11 +203,21 @@ function handleParseAzureRecordsComplete(error, records) {
 
 	var actions = lib.compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords);
 
-	if (!options.dryrun) {
-		lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions);
-	} else {
-		cli.info('Exiting without applying actions');
+	if (null !== actions && typeof actions !== 'undefined') {
+		if (!options.dryrun) {
+			lib.applyActions(parsedCSVRecords, parsedAzureRecords, actions, handleActionsApplied);
+		} else {
+			cli.info('Exiting without applying actions');
+		}
 	}
+}
+
+function handleActionsApplied(error) {
+	if (error) {
+		throw error;
+	}
+
+	cli.info('Actions applied without error.');
 }
 
 function loadDefaultAzureCredential(callback) {

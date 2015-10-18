@@ -22,6 +22,7 @@ var Table = require('cli-table');
 var util = require('util');
 var path = require('path');
 var cli = null;
+var _ = require('underscore');
 
 var azCliLibDir = path.dirname(require.resolve('azure-cli'));
 var azCliAdalAuthPath = path.join(azCliLibDir, "/util/authentication/adalAuth.js");
@@ -137,13 +138,21 @@ function getAzureDNSRecords(resourceGroup, zoneName, callback) {
 		for (var d in recordSets.recordSets) {
 			var recordSet = recordSets.recordSets[d];
 
+			var path = recordSet.name;
+			var type = getLocalTypeNameFromAzureTypeName(recordSet.type);
+
+			if (typeof records[path] !== 'object') {
+				records[path] = {};
+			}
+
+			if (typeof records[path][type] !== 'object') {
+				records[path][type] = { values: [], ttl: recordSet.properties.ttl, _azRecordSet: recordSet };
+			}
+
 			for (var propName in recordSet.properties) {
 				if (typeof recordSet.properties[propName] !== 'object' || propName === 'soaRecord') {
 					continue;
 				}
-
-				var path = recordSet.name;
-				var type = getTypeNameFromAzurePropertyName(propName);
 
 				if (type === null) {
 					throw new Error('Unknown azure property: ' + propName);
@@ -151,14 +160,6 @@ function getAzureDNSRecords(resourceGroup, zoneName, callback) {
 
 				if (recordSet.properties[propName].length === 0) {
 					continue;
-				}
-
-				if (typeof records[path] !== 'object') {
-					records[path] = {};
-				}
-
-				if (typeof records[path][type] !== 'object') {
-					records[path][type] = { values: [], ttl: recordSet.properties.ttl };
 				}
 
 				for (var record in recordSet.properties[propName]) {
@@ -169,6 +170,16 @@ function getAzureDNSRecords(resourceGroup, zoneName, callback) {
 
 		callback(null, records);
 	});
+}
+
+function getLocalTypeNameFromAzureTypeName(azTypeName) {
+	for (var typeName in RecordTypeData) {
+		if (RecordTypeData[typeName].typeName === azTypeName) {
+			return typeName;
+		}
+	}
+
+	throw new Error('Unkown Azure type name: ' + azTypeName);
 }
 
 function getTypeNameFromAzurePropertyName(propName) {
@@ -225,7 +236,12 @@ function compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords) {
 					var azRecord = getAzureRecordFromRecordSet(parsedCSVRecords[path][type].values[record], azRecordSet);
 
 					if (null === azRecord) {
-						recordActions.createAndUpdate.push({ path: path, type: type, reason: 'no-matching-remote-record', record: parsedCSVRecords[path][type].values[record] });
+						recordActions.createAndUpdate.push({
+							path: path,
+							type: type,
+							reason: 'no-matching-remote-record',
+							record: parsedCSVRecords[path][type].values[record],
+							_azRecordSet: azRecordSet, });
 					}
 				}
 			}
@@ -298,6 +314,68 @@ function compareRecordSetsAndGetActions(parsedCSVRecords, parsedAzureRecords) {
 		recordActions: recordActions,
 		recordSetActions: recordSetActions,
 	};
+}
+
+function applyActions(parsedCSVRecords, parsedAzureRecords, actions, callback) {
+	if (typeof callback !== 'function') {
+		throw new Error('applyActions callback must be a function');
+	}
+
+	var recordActions = actions.recordActions;
+	var recordSetActions = actions.recordSetActions;
+
+	var dnsManager = azureDns.createDnsManagementClient(credentials);
+
+	var actionCount = 
+		recordActions.createAndUpdate.length + 
+		recordActions.remove.length + 
+		recordSetActions.createAndUpdate.length + 
+		recordActions.remove.length;
+
+	var completeActionCount = 0;
+
+	if (actionCount === 0) {
+		cli.info("No actions to apply.");
+		callback(null);
+		return;
+	}
+
+	cli.info("Applying actions...");
+	cli.progress(completeActionCount/actionCount)
+
+	// Apply record set create and update actions
+	for (var a in recordSetActions.createAndUpdate) {
+		var set = recordSetActions.createAndUpdate[a];
+		var recordSet = 
+			new RecordSet(
+				credentials.credentials.subscriptionId, 
+				options.resourceGroup, 
+				options.zoneName,
+				set.type, 
+				set.path, 
+				{ properties: { ttl: set.record.ttl } });
+
+		recordSet.StripUnusedProperties();
+
+		dnsManager.recordSets.createOrUpdate(
+			options.resourceGroup,
+			options.zoneName,
+			set.path,
+			set.type,
+			{ recordSet: recordSet },
+			function handleRecordSetActionComplete(error, result) {
+				console.error(error);
+				if (error) {
+					throw error;
+				}
+
+				cli.progress(++completeActionCount/actionCount);
+
+				if (completeActionCount === actionCount) {
+					callback(null);
+				}
+			});
+	}
 }
 
 function summarizeRecordValue(record, type) {
@@ -620,9 +698,95 @@ function getSourceDNSRecordsForPath(dnsName, path, callback) {
 	next(null, null);
 }
 
+function nullOrBadType(thing, type) {
+	return typeof thing !== type || null === thing;
+}
+
 function setOptions (opts) { options = opts; }
 function setCredentials (creds) { credentials = creds; }
 function setCLI (c) { cli = c; }
+
+var RecordSet = function RecordSetConstructor(subscriptionOrBaseRecordSet, resourceGroup, zoneName, type, path, options) {
+	var subscription = subscriptionOrBaseRecordSet;
+
+	if (null !== subscription && typeof subscription === 'object') {
+		options = subscription;
+	} else {
+		if (nullOrBadType(subscription, 'string')) {
+			throw new Error('Recordset subscription cannot be null');
+		}
+
+		if (nullOrBadType(resourceGroup, 'string')) {
+			throw new Error('Recordset resourceGroup cannot be null');
+		}
+
+		if (nullOrBadType(zoneName, 'string')) {
+			throw new Error('Recordset zoneName cannot be null');
+		}
+
+		if (nullOrBadType(type, 'string')) {
+			throw new Error('Recordset type cannot be null');
+		}
+
+		if (nullOrBadType(path, 'string')) {
+			throw new Error('Recordset path cannot be null');
+		}
+
+		if (typeof options !== 'object' || options === null) {
+			options = {};
+		}
+	}
+
+	var opts = _.extend({
+		name: path,
+		type: "Microsoft.Network/dnszones/" + type,
+		location: 'global',
+		tags: [],
+		eTag: null,
+		id: util.format(
+				"/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/dnszones/%s/%s/%s",
+				subscription,
+				resourceGroup,
+				zoneName,
+				type,
+				path),
+	}, options);
+
+	this.id = opts.id;
+	this.name = opts.name;
+	this.location = opts.location;
+	this.type = opts.type;
+	this.tags = opts.tags;
+	this.eTag = opts.eTag;
+
+	this.properties = _.extend({
+        "aaaaRecords":[],
+        "aRecords": [],
+        "mxRecords": [],
+        "nsRecords": [],
+        "ptrRecords": [],
+        "srvRecords": [],
+        "txtRecords": [],
+        "ttl": 600
+     }, options.properties);
+}
+
+RecordSet.prototype.StripUnusedProperties = function () {
+	var removeProps = [];
+	for (var p in this.properties) {
+		if (typeof this.properties[p] !== 'object') {
+			continue;
+		}
+
+		if (this.properties[p] === null || this.properties[p].length === 0) {
+			removeProps.push(p);
+		}
+	}
+
+	for (var i in removeProps) {
+		delete this.properties[removeProps[i]];
+	}
+}
 
 module.exports = {
 	init: function init(opts, cli, creds) {
@@ -658,6 +822,7 @@ module.exports = {
 			getRecordTypeValue: getRecordTypeValue,
 			writeRecordsFile: writeRecordsFile,
 			getSourceDNSRecords: getSourceDNSRecords,
+			applyActions: applyActions,
 		};
 	}
 };
