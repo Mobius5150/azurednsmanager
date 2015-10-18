@@ -145,9 +145,11 @@ function runImportMode(options) {
 	} else if (options.source === 'DNS') {
 		var paths = [ '@' ];
 
-		var pathList = options.paths.split(',');
-		for (var p in pathList) {
-			paths.push(pathList[p]);
+		if (options.paths !== null) {
+			var pathList = options.paths.split(',');
+			for (var p in pathList) {
+				paths.push(pathList[p]);
+			}
 		}
 
 		lib.getSourceDNSRecords(options.zoneName, paths, function importHandleSourceDNSRecords(error, records) {
