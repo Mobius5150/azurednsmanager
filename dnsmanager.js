@@ -50,7 +50,7 @@ cli.main(function Main(args, opts) {
 		cli.fatal('You must specify an outfile to run in import mode. See --help.');
 	}
 
-	lib = require('./dnsmanlib.js').init(options, cli, null);
+	lib = require('./lib/dnsmanlib.js').init(options, cli, null);
 
 	if (options.import) {
 		runImportMode(options);
