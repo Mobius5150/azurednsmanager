@@ -13,10 +13,10 @@
     "underscore": "^1.8.3"
   },
   "devDependencies": {
-    "jasmine": "^2.3.2",
+    "jasmine": "^2.3.2"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "./test.js"
   },
   "author": "Michael Blouin",
   "license": "Apache-2.0",
