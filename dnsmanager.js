@@ -111,7 +111,7 @@ function runImportMode(options) {
 			cli.fatal('zoneName must be specified. Use -h for help.');
 			return;
 		} else if (options.source === 'DNS') {
-			cli.fatal('DNS name must be specific with the -z option. Use -h for help.');
+			cli.fatal('DNS name must be specific with the -n option. Use -h for help.');
 		}
 	}
 
